@@ -10,7 +10,7 @@ DOCKER_REPOSITORY=gotenberg
 GOTENBERG_VERSION=snapshot
 GOTENBERG_USER_GID=1001
 GOTENBERG_USER_UID=1001
-NOTO_COLOR_EMOJI_VERSION=v2.038 # See https://github.com/googlefonts/noto-emoji/releases.
+NOTO_COLOR_EMOJI_VERSION=v2.040 # See https://github.com/googlefonts/noto-emoji/releases.
 PDFTK_VERSION=v3.3.3 # See https://gitlab.com/pdftk-java/pdftk/-/releases - Binary package.
 GOLANGCI_LINT_VERSION=v1.54.2 # See https://github.com/golangci/golangci-lint/releases.
 
@@ -33,7 +33,9 @@ API_TIMEOUT=30s
 API_ROOT_PATH=/
 API_TRACE_HEADER=Gotenberg-Trace
 API_DISABLE_HEALTH_CHECK_LOGGING=false
-CHROMIUM_FAILED_STARTS_THRESHOLD=5
+CHROMIUM_RESTART_AFTER=0
+CHROMIUM_AUTO_START=false
+CHROMIUM_START_TIMEOUT=10s
 CHROMIUM_INCOGNITO=false
 CHROMIUM_ALLOW_INSECURE_LOCALHOST=false
 CHROMIUM_IGNORE_CERTIFICATE_ERRORS=false
@@ -45,7 +47,10 @@ CHROMIUM_ALLOW_LIST=
 CHROMIUM_DENY_LIST="^file:///[^tmp].*"
 CHROMIUM_DISABLE_JAVASCRIPT=false
 CHROMIUM_DISABLE_ROUTES=false
-LIBREOFFICE_DISABLES_ROUTES=false
+LIBREOFFICE_RESTART_AFTER=10
+LIBREOFFICE_AUTO_START=false
+LIBREOFFICE_START_TIMEOUT=10s
+LIBREOFFICE_DISABLE_ROUTES=false
 LOG_LEVEL=info
 LOG_FORMAT=auto
 LOG_FIELDS_PREFIX=
@@ -55,8 +60,6 @@ PROMETHEUS_NAMESPACE=gotenberg
 PROMETHEUS_COLLECT_INTERVAL=1s
 PROMETHEUS_DISABLE_ROUTE_LOGGING=false
 PROMETHEUS_DISABLE_COLLECT=false
-UNO_LISTENER_START_TIMEOUT=10s
-UNO_LISTENER_RESTART_THRESHOLD=10
 WEBHOOK_ALLOW_LIST=
 WEBHOOK_DENY_LIST=
 WEBHOOK_ERROR_ALLOW_LIST=
@@ -80,7 +83,9 @@ run: ## Start a Gotenberg container
 	--api-root-path=$(API_ROOT_PATH) \
 	--api-trace-header=$(API_TRACE_HEADER) \
 	--api-disable-health-check-logging=$(API_DISABLE_HEALTH_CHECK_LOGGING) \
-	--chromium-failed-starts-threshold=$(CHROMIUM_FAILED_STARTS_THRESHOLD) \
+	--chromium-restart-after=$(CHROMIUM_RESTART_AFTER) \
+	--chromium-auto-start=$(CHROMIUM_AUTO_START) \
+	--chromium-start-timeout=$(CHROMIUM_START_TIMEOUT) \
 	--chromium-incognito=$(CHROMIUM_INCOGNITO) \
 	--chromium-allow-insecure-localhost=$(CHROMIUM_ALLOW_INSECURE_LOCALHOST) \
 	--chromium-ignore-certificate-errors=$(CHROMIUM_IGNORE_CERTIFICATE_ERRORS) \
@@ -92,7 +97,10 @@ run: ## Start a Gotenberg container
 	--chromium-deny-list=$(CHROMIUM_DENY_LIST) \
 	--chromium-disable-javascript=$(CHROMIUM_DISABLE_JAVASCRIPT) \
 	--chromium-disable-routes=$(CHROMIUM_DISABLE_ROUTES) \
-	--libreoffice-disable-routes=$(LIBREOFFICE_DISABLES_ROUTES) \
+	--libreoffice-restart-after=$(LIBREOFFICE_RESTART_AFTER) \
+	--libreoffice-auto-start=$(LIBREOFFICE_AUTO_START) \
+	--libreoffice-start-timeout=$(LIBREOFFICE_START_TIMEOUT) \
+	--libreoffice-disable-routes=$(LIBREOFFICE_DISABLE_ROUTES) \
 	--log-level=$(LOG_LEVEL) \
 	--log-format=$(LOG_FORMAT) \
 	--log-fields-prefix=$(LOG_FIELDS_PREFIX) \
@@ -102,8 +110,6 @@ run: ## Start a Gotenberg container
 	--prometheus-collect-interval=$(PROMETHEUS_COLLECT_INTERVAL) \
 	--prometheus-disable-route-logging=$(PROMETHEUS_DISABLE_ROUTE_LOGGING) \
 	--prometheus-disable-collect=$(PROMETHEUS_DISABLE_COLLECT) \
-	--uno-listener-start-timeout=$(UNO_LISTENER_START_TIMEOUT) \
-	--uno-listener-restart-threshold=$(UNO_LISTENER_RESTART_THRESHOLD) \
 	--webhook-allow-list=$(WEBHOOK_ALLOW_LIST) \
 	--webhook-deny-list=$(WEBHOOK_DENY_LIST) \
 	--webhook-error-allow-list=$(WEBHOOK_ERROR_ALLOW_LIST) \
@@ -138,13 +144,17 @@ tests-once: ## Run the tests once (prefer the "tests" command while developing)
 	$(DOCKER_REPOSITORY)/gotenberg:$(GOTENBERG_VERSION)-tests \
 	gotest
 
+# go install mvdan.cc/gofumpt@latest
+# go install github.com/daixiang0/gci@latest
 .PHONY: fmt
 fmt: ## Format the code and "optimize" the dependencies
-	go fmt ./...
+	gofumpt -l -w .
+	gci write -s standard -s default -s "prefix(github.com/gotenberg/gotenberg/v7)" --skip-generated --skip-vendor --custom-order .
 	go mod tidy
 
+# go install golang.org/x/tools/cmd/godoc@latest
 .PHONY: godoc
-godoc: ## Run a webserver with Gotenberg godoc (go get golang.org/x/tools/cmd/godoc)
+godoc: ## Run a webserver with Gotenberg godoc
 	$(info http://localhost:6060/pkg/github.com/gotenberg/gotenberg/v7)
 	godoc -http=:6060
 

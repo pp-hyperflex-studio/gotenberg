@@ -3,903 +3,803 @@ package chromium
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"reflect"
 	"testing"
 
-	"github.com/gotenberg/gotenberg/v7/pkg/gotenberg"
-	"github.com/gotenberg/gotenberg/v7/pkg/modules/api"
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
+
+	"github.com/gotenberg/gotenberg/v7/pkg/gotenberg"
+	"github.com/gotenberg/gotenberg/v7/pkg/modules/api"
 )
 
-func TestFormDataChromiumPDFOptions(t *testing.T) {
-	for i, tc := range []struct {
-		ctx     *api.ContextMock
-		options Options
+func TestFormDataChromiumPdfOptions(t *testing.T) {
+	for _, tc := range []struct {
+		scenario        string
+		ctx             *api.ContextMock
+		expectedOptions Options
 	}{
 		{
-			ctx:     &api.ContextMock{Context: &api.Context{}},
-			options: DefaultOptions(),
+			scenario:        "no custom form fields",
+			ctx:             &api.ContextMock{Context: new(api.Context)},
+			expectedOptions: DefaultOptions(),
 		},
 		{
+			scenario: "deprecated userAgent form field",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
+				ctx.SetValues(map[string][]string{
+					"userAgent": {
+						"foo",
+					},
+				})
+				return ctx
+			}(),
+			expectedOptions: func() Options {
+				options := DefaultOptions()
+				options.ExtraHttpHeaders = map[string]string{
+					"User-Agent": "foo",
+				}
+				return options
+			}(),
+		},
+		{
+			scenario: "invalid extraHttpHeaders form field",
+			ctx: func() *api.ContextMock {
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetValues(map[string][]string{
 					"extraHttpHeaders": {
 						"foo",
 					},
 				})
-
 				return ctx
 			}(),
-			options: DefaultOptions(),
+			expectedOptions: DefaultOptions(),
 		},
 		{
+			scenario: "valid extraHttpHeaders form field",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetValues(map[string][]string{
 					"extraHttpHeaders": {
 						`{"foo":"bar"}`,
 					},
 				})
-
 				return ctx
 			}(),
-			options: func() Options {
+			expectedOptions: func() Options {
 				options := DefaultOptions()
-				options.ExtraHTTPHeaders = map[string]string{
+				options.ExtraHttpHeaders = map[string]string{
 					"foo": "bar",
 				}
-
 				return options
 			}(),
 		},
 		{
+			scenario: "invalid emulatedMediaType form field",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetValues(map[string][]string{
-					"extraHttpHeaders": {
-						"foo",
-					},
-				})
-
-				return ctx
-			}(),
-			options: DefaultOptions(),
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetValues(map[string][]string{
 					"emulatedMediaType": {
 						"foo",
 					},
 				})
-
 				return ctx
 			}(),
-			options: DefaultOptions(),
+			expectedOptions: DefaultOptions(),
 		},
 		{
+			scenario: "valid emulatedMediaType form field",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetValues(map[string][]string{
 					"emulatedMediaType": {
 						"screen",
 					},
 				})
-
 				return ctx
 			}(),
-			options: func() Options {
+			expectedOptions: func() Options {
 				options := DefaultOptions()
 				options.EmulatedMediaType = "screen"
-
 				return options
 			}(),
 		},
 	} {
-		_, actual := FormDataChromiumPDFOptions(tc.ctx.Context)
+		t.Run(tc.scenario, func(t *testing.T) {
+			tc.ctx.SetLogger(zap.NewNop())
+			_, actual := FormDataChromiumPdfOptions(tc.ctx.Context)
 
-		if !reflect.DeepEqual(actual, tc.options) {
-			t.Errorf("test %d: expected %+v but got: %+v", i, tc.options, actual)
-		}
+			if !reflect.DeepEqual(actual, tc.expectedOptions) {
+				t.Fatalf("expected %+v but got: %+v", tc.expectedOptions, actual)
+			}
+		})
 	}
 }
 
-func TestConvertURLHandler(t *testing.T) {
-	for i, tc := range []struct {
+func TestFormDataChromiumPdfFormats(t *testing.T) {
+	for _, tc := range []struct {
+		scenario           string
+		ctx                *api.ContextMock
+		expectedPdfFormats gotenberg.PdfFormats
+	}{
+		{
+			scenario:           "no custom form fields",
+			ctx:                &api.ContextMock{Context: new(api.Context)},
+			expectedPdfFormats: gotenberg.PdfFormats{},
+		},
+		{
+			scenario: "deprecated pdfFormat form field",
+			ctx: func() *api.ContextMock {
+				ctx := &api.ContextMock{Context: new(api.Context)}
+				ctx.SetValues(map[string][]string{
+					"pdfFormat": {
+						"foo",
+					},
+				})
+				return ctx
+			}(),
+			expectedPdfFormats: gotenberg.PdfFormats{PdfA: "foo"},
+		},
+		{
+			scenario: "pdfa and pdfua form fields",
+			ctx: func() *api.ContextMock {
+				ctx := &api.ContextMock{Context: new(api.Context)}
+				ctx.SetValues(map[string][]string{
+					"pdfa": {
+						"foo",
+					},
+					"pdfua": {
+						"true",
+					},
+				})
+				return ctx
+			}(),
+			expectedPdfFormats: gotenberg.PdfFormats{PdfA: "foo", PdfUa: true},
+		},
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			tc.ctx.SetLogger(zap.NewNop())
+			actual := FormDataChromiumPdfFormats(tc.ctx.Context)
+
+			if !reflect.DeepEqual(actual, tc.expectedPdfFormats) {
+				t.Fatalf("expected %+v but got: %+v", tc.expectedPdfFormats, actual)
+			}
+		})
+	}
+}
+
+func TestConvertUrlRoute(t *testing.T) {
+	for _, tc := range []struct {
+		scenario               string
 		ctx                    *api.ContextMock
-		api                    API
-		expectErr              bool
-		expectHTTPErr          bool
-		expectHTTPStatus       int
+		api                    Api
+		expectError            bool
+		expectHttpError        bool
+		expectHttpStatus       int
 		expectOutputPathsCount int
 	}{
 		{
-			ctx:              &api.ContextMock{Context: &api.Context{}},
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
+			scenario:               "missing mandatory url form field",
+			ctx:                    &api.ContextMock{Context: new(api.Context)},
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
 		},
 		{
+			scenario: "empty url form field",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetValues(map[string][]string{
 					"url": {
 						"",
 					},
 				})
-
 				return ctx
 			}(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
 		},
 		{
+			scenario: "error from Chromium",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetValues(map[string][]string{
 					"url": {
 						"foo",
 					},
 				})
-
 				return ctx
 			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return errors.New("foo")
-				}
-
-				return chromiumAPI
-			}(),
-			expectErr: true,
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return errors.New("foo")
+			}},
+			expectError:            true,
+			expectHttpError:        false,
+			expectOutputPathsCount: 0,
 		},
 		{
+			scenario: "success",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetValues(map[string][]string{
 					"url": {
 						"foo",
 					},
 				})
-
 				return ctx
 			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			expectOutputPathsCount: 1,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetValues(map[string][]string{
-					"url": {
-						"foo",
-					},
-					"extraLinkTags": {
-						"foo",
-					},
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetValues(map[string][]string{
-					"url": {
-						"foo",
-					},
-					"extraScriptTags": {
-						"foo",
-					},
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetValues(map[string][]string{
-					"url": {
-						"foo",
-					},
-					"extraLinkTags": {
-						`[{"href":"https://cdn.foo/foo.css"},{"href":"https://cdn.bar/bar.css"}]`,
-					},
-					"extraScriptTags": {
-						`[{"src":"https://cdn.foo/foo.js"},{"src":"https://cdn.bar/bar.js"}]`,
-					},
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return nil
+			}},
+			expectError:            false,
+			expectHttpError:        false,
 			expectOutputPathsCount: 1,
 		},
 	} {
-		c := echo.New().NewContext(nil, nil)
-		c.Set("context", tc.ctx.Context)
+		t.Run(tc.scenario, func(t *testing.T) {
+			tc.ctx.SetLogger(zap.NewNop())
+			c := echo.New().NewContext(nil, nil)
+			c.Set("context", tc.ctx.Context)
 
-		err := convertURLRoute(tc.api, nil).Handler(c)
+			err := convertUrlRoute(tc.api, nil).Handler(c)
 
-		if tc.expectErr && err == nil {
-			t.Errorf("test %d: expected error but got: %v", i, err)
-		}
-
-		if !tc.expectErr && err != nil {
-			t.Errorf("test %d: expected no error but got: %v", i, err)
-		}
-
-		var httpErr api.HTTPError
-		isHTTPErr := errors.As(err, &httpErr)
-
-		if tc.expectHTTPErr && !isHTTPErr {
-			t.Errorf("test %d: expected HTTP error but got: %v", i, err)
-		}
-
-		if !tc.expectHTTPErr && isHTTPErr {
-			t.Errorf("test %d: expected no HTTP error but got one: %v", i, httpErr)
-		}
-
-		if err != nil && tc.expectHTTPErr && isHTTPErr {
-			status, _ := httpErr.HTTPError()
-			if status != tc.expectHTTPStatus {
-				t.Errorf("test %d: expected %d HTTP status code but got %d", i, tc.expectHTTPStatus, status)
+			if tc.expectError && err == nil {
+				t.Fatal("expected error but got none", err)
 			}
-		}
 
-		if tc.expectOutputPathsCount != len(tc.ctx.OutputPaths()) {
-			t.Errorf("test %d: expected %d output paths but got %d", i, tc.expectOutputPathsCount, len(tc.ctx.OutputPaths()))
-		}
+			if !tc.expectError && err != nil {
+				t.Fatalf("expected no error but got: %v", err)
+			}
+
+			var httpErr api.HttpError
+			isHttpError := errors.As(err, &httpErr)
+
+			if tc.expectHttpError && !isHttpError {
+				t.Errorf("expected an HTTP error but got: %v", err)
+			}
+
+			if !tc.expectHttpError && isHttpError {
+				t.Errorf("expected no HTTP error but got one: %v", httpErr)
+			}
+
+			if err != nil && tc.expectHttpError && isHttpError {
+				status, _ := httpErr.HttpError()
+				if status != tc.expectHttpStatus {
+					t.Errorf("expected %d as HTTP status code but got %d", tc.expectHttpStatus, status)
+				}
+			}
+
+			if tc.expectOutputPathsCount != len(tc.ctx.OutputPaths()) {
+				t.Errorf("expected %d output paths but got %d", tc.expectOutputPathsCount, len(tc.ctx.OutputPaths()))
+			}
+		})
 	}
 }
 
-func TestConvertHTMLHandler(t *testing.T) {
-	for i, tc := range []struct {
+func TestConvertHtmlRoute(t *testing.T) {
+	for _, tc := range []struct {
+		scenario               string
 		ctx                    *api.ContextMock
-		api                    API
-		expectErr              bool
-		expectHTTPErr          bool
-		expectHTTPStatus       int
+		api                    Api
+		expectError            bool
+		expectHttpError        bool
+		expectHttpStatus       int
 		expectOutputPathsCount int
 	}{
 		{
-			ctx:              &api.ContextMock{Context: &api.Context{}},
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
+			scenario:               "missing mandatory index.html form file",
+			ctx:                    &api.ContextMock{Context: new(api.Context)},
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
 		},
 		{
+			scenario: "error from Chromium",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetFiles(map[string]string{
-					"foo.html": "/foo/foo.html",
+					"index.html": "/index.html",
 				})
-
 				return ctx
 			}(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return errors.New("foo")
+			}},
+			expectError:            true,
+			expectHttpError:        false,
+			expectOutputPathsCount: 0,
 		},
 		{
+			scenario: "success",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetFiles(map[string]string{
-					"index.html": "/foo/foo.html",
+					"index.html": "/index.html",
 				})
-
 				return ctx
 			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return errors.New("foo")
-				}
-
-				return chromiumAPI
-			}(),
-			expectErr: true,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetFiles(map[string]string{
-					"index.html": "/foo/foo.html",
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return nil
+			}},
+			expectError:            false,
+			expectHttpError:        false,
 			expectOutputPathsCount: 1,
 		},
 	} {
-		c := echo.New().NewContext(nil, nil)
-		c.Set("context", tc.ctx.Context)
+		t.Run(tc.scenario, func(t *testing.T) {
+			tc.ctx.SetLogger(zap.NewNop())
+			c := echo.New().NewContext(nil, nil)
+			c.Set("context", tc.ctx.Context)
 
-		err := convertHTMLRoute(tc.api, nil).Handler(c)
+			err := convertHtmlRoute(tc.api, nil).Handler(c)
 
-		if tc.expectErr && err == nil {
-			t.Errorf("test %d: expected error but got: %v", i, err)
-		}
-
-		if !tc.expectErr && err != nil {
-			t.Errorf("test %d: expected no error but got: %v", i, err)
-		}
-
-		var httpErr api.HTTPError
-		isHTTPErr := errors.As(err, &httpErr)
-
-		if tc.expectHTTPErr && !isHTTPErr {
-			t.Errorf("test %d: expected HTTP error but got: %v", i, err)
-		}
-
-		if !tc.expectHTTPErr && isHTTPErr {
-			t.Errorf("test %d: expected no HTTP error but got one: %v", i, httpErr)
-		}
-
-		if err != nil && tc.expectHTTPErr && isHTTPErr {
-			status, _ := httpErr.HTTPError()
-			if status != tc.expectHTTPStatus {
-				t.Errorf("test %d: expected %d HTTP status code but got %d", i, tc.expectHTTPStatus, status)
+			if tc.expectError && err == nil {
+				t.Fatal("expected error but got none", err)
 			}
-		}
 
-		if tc.expectOutputPathsCount != len(tc.ctx.OutputPaths()) {
-			t.Errorf("test %d: expected %d output paths but got %d", i, tc.expectOutputPathsCount, len(tc.ctx.OutputPaths()))
-		}
+			if !tc.expectError && err != nil {
+				t.Fatalf("expected no error but got: %v", err)
+			}
+
+			var httpErr api.HttpError
+			isHttpError := errors.As(err, &httpErr)
+
+			if tc.expectHttpError && !isHttpError {
+				t.Errorf("expected an HTTP error but got: %v", err)
+			}
+
+			if !tc.expectHttpError && isHttpError {
+				t.Errorf("expected no HTTP error but got one: %v", httpErr)
+			}
+
+			if err != nil && tc.expectHttpError && isHttpError {
+				status, _ := httpErr.HttpError()
+				if status != tc.expectHttpStatus {
+					t.Errorf("expected %d as HTTP status code but got %d", tc.expectHttpStatus, status)
+				}
+			}
+
+			if tc.expectOutputPathsCount != len(tc.ctx.OutputPaths()) {
+				t.Errorf("expected %d output paths but got %d", tc.expectOutputPathsCount, len(tc.ctx.OutputPaths()))
+			}
+		})
 	}
 }
 
-func TestConvertMarkdownHandler(t *testing.T) {
-	for i, tc := range []struct {
+func TestConvertMarkdownRoute(t *testing.T) {
+	for _, tc := range []struct {
+		scenario               string
 		ctx                    *api.ContextMock
-		api                    API
-		outputDir              string
-		expectErr              bool
-		expectHTTPErr          bool
-		expectHTTPStatus       int
+		api                    Api
+		expectError            bool
+		expectHttpError        bool
+		expectHttpStatus       int
 		expectOutputPathsCount int
 	}{
 		{
-			ctx:              &api.ContextMock{Context: &api.Context{}},
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
+			scenario:               "missing mandatory index.html form file",
+			ctx:                    &api.ContextMock{Context: new(api.Context)},
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
 		},
 		{
+			scenario: "missing mandatory markdown form files",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetFiles(map[string]string{
-					"foo.html": "/foo/foo.html",
+					"index.html": "/index.html",
 				})
-
 				return ctx
 			}(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
 		},
 		{
+			scenario: "markdown file requested in index.html not found",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				dirPath := fmt.Sprintf("%s/%s", os.TempDir(), uuid.NewString())
+				ctx := &api.ContextMock{Context: new(api.Context)}
+				ctx.SetDirPath(dirPath)
 				ctx.SetFiles(map[string]string{
-					"index.html": "/foo/foo.html",
+					"index.html":    fmt.Sprintf("%s/index.html", dirPath),
+					"wrong_name.md": fmt.Sprintf("%s/wrong_name.md", dirPath),
 				})
 
-				return ctx
-			}(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetFiles(map[string]string{
-					"index.html":  "/foo/foo.html",
-					"markdown.md": "/foo/markdown.md",
-				})
-
-				return ctx
-			}(),
-			expectErr: true,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetFiles(map[string]string{
-					"index.html":   "/tests/test/testdata/chromium/markdown/sample2/index.html",
-					"markdown1.md": "/foo/markdown1.md",
-				})
-
-				return ctx
-			}(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetFiles(map[string]string{
-					"index.html":   "/tests/test/testdata/chromium/markdown/sample1/index.html",
-					"markdown1.md": "/foo/markdown1.md",
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return errors.New("foo")
-				}
-
-				return chromiumAPI
-			}(),
-			expectErr: true,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-				ctx.SetFiles(map[string]string{
-					"index.html":   "/tests/test/testdata/chromium/markdown/sample1/index.html",
-					"markdown1.md": "/tests/test/testdata/chromium/markdown/sample1/markdown1.md",
-					"markdown2.md": "/tests/test/testdata/chromium/markdown/sample1/markdown2.md",
-					"markdown3.md": "/tests/test/testdata/chromium/markdown/sample1/markdown3.md",
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return errors.New("foo")
-				}
-
-				return chromiumAPI
-			}(),
-			expectErr: true,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-
-				ctx.SetDirPath("/tmp/foo")
-				ctx.SetFiles(map[string]string{
-					"index.html":   "/tests/test/testdata/chromium/markdown/sample1/index.html",
-					"markdown1.md": "/tests/test/testdata/chromium/markdown/sample1/markdown1.md",
-					"markdown2.md": "/tests/test/testdata/chromium/markdown/sample1/markdown2.md",
-					"markdown3.md": "/tests/test/testdata/chromium/markdown/sample1/markdown3.md",
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return errors.New("foo")
-				}
-
-				return chromiumAPI
-			}(),
-			outputDir: "/tmp/foo",
-			expectErr: true,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-
-				ctx.SetDirPath("/tmp/foo")
-				ctx.SetFiles(map[string]string{
-					"index.html":   "/tests/test/testdata/chromium/markdown/sample1/index.html",
-					"markdown1.md": "/tests/test/testdata/chromium/markdown/sample1/markdown1.md",
-					"markdown2.md": "/tests/test/testdata/chromium/markdown/sample1/markdown2.md",
-					"markdown3.md": "/tests/test/testdata/chromium/markdown/sample1/markdown3.md",
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			outputDir:              "/tmp/foo",
-			expectOutputPathsCount: 1,
-		},
-		{
-			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
-
-				ctx.SetDirPath("/tmp/foo")
-				ctx.SetFiles(map[string]string{
-					"index.html":   "/tests/test/testdata/chromium/markdown/sample3/index.html",
-					"markdown1.md": "/tests/test/testdata/chromium/markdown/sample3/markdown.md",
-				})
-
-				return ctx
-			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			outputDir:              "/tmp/foo",
-			expectOutputPathsCount: 1,
-		},
-	} {
-		func() {
-			if tc.outputDir != "" {
-				err := os.MkdirAll(tc.outputDir, 0755)
-
+				err := os.MkdirAll(dirPath, 0o755)
 				if err != nil {
-					t.Fatalf("test %d: expected error but got: %v", i, err)
+					t.Fatalf(fmt.Sprintf("expected no error but got: %v", err))
 				}
 
+				err = os.WriteFile(fmt.Sprintf("%s/index.html", dirPath), []byte("<div>{{ toHTML \"markdown.md\" }}</div>"), 0o755)
+				if err != nil {
+					t.Fatalf("expected no error but got: %v", err)
+				}
+
+				return ctx
+			}(),
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "non-existing markdown file",
+			ctx: func() *api.ContextMock {
+				dirPath := fmt.Sprintf("%s/%s", os.TempDir(), uuid.NewString())
+				ctx := &api.ContextMock{Context: new(api.Context)}
+				ctx.SetDirPath(dirPath)
+				ctx.SetFiles(map[string]string{
+					"index.html":  fmt.Sprintf("%s/index.html", dirPath),
+					"markdown.md": fmt.Sprintf("%s/markdown.md", dirPath),
+				})
+
+				err := os.MkdirAll(dirPath, 0o755)
+				if err != nil {
+					t.Fatalf(fmt.Sprintf("expected no error but got: %v", err))
+				}
+
+				err = os.WriteFile(fmt.Sprintf("%s/index.html", dirPath), []byte("<div>{{ toHTML \"markdown.md\" }}</div>"), 0o755)
+				if err != nil {
+					t.Fatalf("expected no error but got: %v", err)
+				}
+
+				return ctx
+			}(),
+			expectError:            true,
+			expectHttpError:        false,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "error from Chromium",
+			ctx: func() *api.ContextMock {
+				dirPath := fmt.Sprintf("%s/%s", os.TempDir(), uuid.NewString())
+				ctx := &api.ContextMock{Context: new(api.Context)}
+				ctx.SetDirPath(dirPath)
+				ctx.SetFiles(map[string]string{
+					"index.html":  fmt.Sprintf("%s/index.html", dirPath),
+					"markdown.md": fmt.Sprintf("%s/markdown.md", dirPath),
+				})
+
+				err := os.MkdirAll(dirPath, 0o755)
+				if err != nil {
+					t.Fatalf(fmt.Sprintf("expected no error but got: %v", err))
+				}
+
+				err = os.WriteFile(fmt.Sprintf("%s/index.html", dirPath), []byte("<div>{{ toHTML \"markdown.md\" }}</div>"), 0o755)
+				if err != nil {
+					t.Fatalf("expected no error but got: %v", err)
+				}
+
+				err = os.WriteFile(fmt.Sprintf("%s/markdown.md", dirPath), []byte("# Hello World!"), 0o755)
+				if err != nil {
+					t.Fatalf("expected no error but got: %v", err)
+				}
+
+				return ctx
+			}(),
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return errors.New("foo")
+			}},
+			expectError:            true,
+			expectHttpError:        false,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "success",
+			ctx: func() *api.ContextMock {
+				dirPath := fmt.Sprintf("%s/%s", os.TempDir(), uuid.NewString())
+				ctx := &api.ContextMock{Context: new(api.Context)}
+				ctx.SetDirPath(dirPath)
+				ctx.SetFiles(map[string]string{
+					"index.html":  fmt.Sprintf("%s/index.html", dirPath),
+					"markdown.md": fmt.Sprintf("%s/markdown.md", dirPath),
+				})
+
+				err := os.MkdirAll(dirPath, 0o755)
+				if err != nil {
+					t.Fatalf(fmt.Sprintf("expected no error but got: %v", err))
+				}
+
+				err = os.WriteFile(fmt.Sprintf("%s/index.html", dirPath), []byte("<div>{{ toHTML \"markdown.md\" }}</div>"), 0o755)
+				if err != nil {
+					t.Fatalf("expected no error but got: %v", err)
+				}
+
+				err = os.WriteFile(fmt.Sprintf("%s/markdown.md", dirPath), []byte("# Hello World!"), 0o755)
+				if err != nil {
+					t.Fatalf("expected no error but got: %v", err)
+				}
+
+				return ctx
+			}(),
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return nil
+			}},
+			expectError:            false,
+			expectHttpError:        false,
+			expectOutputPathsCount: 1,
+		},
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			if tc.ctx.DirPath() != "" {
 				defer func() {
-					err := os.RemoveAll(tc.outputDir)
+					err := os.RemoveAll(tc.ctx.DirPath())
 					if err != nil {
-						t.Fatalf("test %d: expected no error but got: %v", i, err)
+						t.Fatalf("expected no error but got: %v", err)
 					}
 				}()
 			}
 
+			tc.ctx.SetLogger(zap.NewNop())
 			c := echo.New().NewContext(nil, nil)
 			c.Set("context", tc.ctx.Context)
 
 			err := convertMarkdownRoute(tc.api, nil).Handler(c)
 
-			if tc.expectErr && err == nil {
-				t.Errorf("test %d: expected error but got: %v", i, err)
+			if tc.expectError && err == nil {
+				t.Fatal("expected error but got none", err)
 			}
 
-			if !tc.expectErr && err != nil {
-				t.Errorf("test %d: expected no error but got: %v", i, err)
+			if !tc.expectError && err != nil {
+				t.Fatalf("expected no error but got: %v", err)
 			}
 
-			var httpErr api.HTTPError
-			isHTTPErr := errors.As(err, &httpErr)
+			var httpErr api.HttpError
+			isHttpError := errors.As(err, &httpErr)
 
-			if tc.expectHTTPErr && !isHTTPErr {
-				t.Errorf("test %d: expected HTTP error but got: %v", i, err)
+			if tc.expectHttpError && !isHttpError {
+				t.Errorf("expected an HTTP error but got: %v", err)
 			}
 
-			if !tc.expectHTTPErr && isHTTPErr {
-				t.Errorf("test %d: expected no HTTP error but got one: %v", i, httpErr)
+			if !tc.expectHttpError && isHttpError {
+				t.Errorf("expected no HTTP error but got one: %v", httpErr)
 			}
 
-			if err != nil && tc.expectHTTPErr && isHTTPErr {
-				status, _ := httpErr.HTTPError()
-				if status != tc.expectHTTPStatus {
-					t.Errorf("test %d: expected %d HTTP status code but got %d", i, tc.expectHTTPStatus, status)
+			if err != nil && tc.expectHttpError && isHttpError {
+				status, _ := httpErr.HttpError()
+				if status != tc.expectHttpStatus {
+					t.Errorf("expected %d as HTTP status code but got %d", tc.expectHttpStatus, status)
 				}
 			}
 
 			if tc.expectOutputPathsCount != len(tc.ctx.OutputPaths()) {
-				t.Errorf("test %d: expected %d output paths but got %d", i, tc.expectOutputPathsCount, len(tc.ctx.OutputPaths()))
+				t.Errorf("expected %d output paths but got %d", tc.expectOutputPathsCount, len(tc.ctx.OutputPaths()))
 			}
-		}()
+		})
 	}
 }
 
-func TestConvertURL(t *testing.T) {
-	for i, tc := range []struct {
+func TestConvertUrl(t *testing.T) {
+	for _, tc := range []struct {
+		scenario               string
 		ctx                    *api.ContextMock
-		api                    API
-		engine                 gotenberg.PDFEngine
-		PDFformat              string
+		api                    Api
+		engine                 gotenberg.PdfEngine
+		pdfFormats             gotenberg.PdfFormats
 		options                Options
-		expectErr              bool
-		expectHTTPErr          bool
-		expectHTTPStatus       int
+		expectError            bool
+		expectHttpError        bool
+		expectHttpStatus       int
 		expectOutputPathsCount int
 	}{
 		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return ErrURLNotAuthorized
-				}
-
-				return chromiumAPI
-			}(),
-			options:          DefaultOptions(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusForbidden,
+			scenario: "ErrUrlNotAuthorized",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return ErrUrlNotAuthorized
+			}},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusForbidden,
+			expectOutputPathsCount: 0,
 		},
 		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return ErrOmitBackgroundWithoutPrintBackground
-				}
-
-				return chromiumAPI
-			}(),
-			options:          DefaultOptions(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
+			scenario: "ErrOmitBackgroundWithoutPrintBackground",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return ErrOmitBackgroundWithoutPrintBackground
+			}},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
 		},
 		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return ErrInvalidEvaluationExpression
-				}
-
-				return chromiumAPI
-			}(),
-			options:   DefaultOptions(),
-			expectErr: true,
+			scenario: "ErrInvalidEvaluationExpression (without waitForExpression form field)",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return ErrInvalidEvaluationExpression
+			}},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        false,
+			expectOutputPathsCount: 0,
 		},
 		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return ErrInvalidEvaluationExpression
-				}
-
-				return chromiumAPI
-			}(),
+			scenario: "ErrInvalidEvaluationExpression (with waitForExpression form field)",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return ErrInvalidEvaluationExpression
+			}},
 			options: func() Options {
 				options := DefaultOptions()
 				options.WaitForExpression = "foo"
 
 				return options
 			}(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
 		},
 		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return ErrInvalidPrinterSettings
-				}
-
-				return chromiumAPI
-			}(),
-			options:          DefaultOptions(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
-		},
-		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return ErrPageRangesSyntaxError
-				}
-
-				return chromiumAPI
-			}(),
-			options:          DefaultOptions(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
-		},
-		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return ErrConsoleExceptions
-				}
-
-				return chromiumAPI
-			}(),
-			options:          DefaultOptions(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusConflict,
-		},
-		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return errors.New("foo")
-				}
-
-				return chromiumAPI
-			}(),
-			options:   DefaultOptions(),
-			expectErr: true,
-		},
-		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			engine: func() gotenberg.PDFEngine {
-				return &ProtoPDFEngine{
-					convert: func(_ context.Context, _ *zap.Logger, _, _, _ string) error {
-						return gotenberg.ErrPDFFormatNotAvailable
-					},
-				}
-			}(),
-			PDFformat:        "foo",
-			options:          DefaultOptions(),
-			expectErr:        true,
-			expectHTTPErr:    true,
-			expectHTTPStatus: http.StatusBadRequest,
-		},
-		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			engine: func() gotenberg.PDFEngine {
-				return &ProtoPDFEngine{
-					convert: func(_ context.Context, _ *zap.Logger, _, _, _ string) error {
-						return errors.New("foo")
-					},
-				}
-			}(),
-			PDFformat: "foo",
-			options:   DefaultOptions(),
-			expectErr: true,
-		},
-		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			engine: func() gotenberg.PDFEngine {
-				return &ProtoPDFEngine{
-					convert: func(_ context.Context, _ *zap.Logger, _, _, _ string) error {
-						return nil
-					},
-				}
-			}(),
-			PDFformat:              "foo",
+			scenario: "ErrInvalidPrinterSettings",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return ErrInvalidPrinterSettings
+			}},
 			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "ErrPageRangesSyntaxError",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return ErrPageRangesSyntaxError
+			}},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "ErrConsoleExceptions",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return ErrConsoleExceptions
+			}},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusConflict,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "error from Chromium",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return errors.New("foo")
+			}},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        false,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "ErrPdfFormatNotSupported",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return nil
+			}},
+			engine: &gotenberg.PdfEngineMock{ConvertMock: func(ctx context.Context, logger *zap.Logger, formats gotenberg.PdfFormats, inputPath, outputPath string) error {
+				return gotenberg.ErrPdfFormatNotSupported
+			}},
+			pdfFormats:             gotenberg.PdfFormats{PdfA: "foo"},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        true,
+			expectHttpStatus:       http.StatusBadRequest,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "error from PDF engine",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return nil
+			}},
+			engine: &gotenberg.PdfEngineMock{ConvertMock: func(ctx context.Context, logger *zap.Logger, formats gotenberg.PdfFormats, inputPath, outputPath string) error {
+				return errors.New("foo")
+			}},
+			pdfFormats:             gotenberg.PdfFormats{PdfA: "foo"},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        false,
+			expectOutputPathsCount: 0,
+		},
+		{
+			scenario: "success with pdfFormat form field",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return nil
+			}},
+			engine: &gotenberg.PdfEngineMock{ConvertMock: func(ctx context.Context, logger *zap.Logger, formats gotenberg.PdfFormats, inputPath, outputPath string) error {
+				return nil
+			}},
+			pdfFormats:             gotenberg.PdfFormats{PdfA: gotenberg.PdfA1a},
+			options:                DefaultOptions(),
+			expectError:            false,
+			expectHttpError:        false,
 			expectOutputPathsCount: 1,
 		},
 		{
+			scenario: "cannot add output paths",
 			ctx: func() *api.ContextMock {
-				ctx := &api.ContextMock{Context: &api.Context{}}
+				ctx := &api.ContextMock{Context: new(api.Context)}
 				ctx.SetCancelled(true)
-
 				return ctx
 			}(),
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
-			options:   DefaultOptions(),
-			expectErr: true,
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return nil
+			}},
+			options:                DefaultOptions(),
+			expectError:            true,
+			expectHttpError:        false,
+			expectOutputPathsCount: 0,
 		},
 		{
-			ctx: &api.ContextMock{Context: &api.Context{}},
-			api: func() API {
-				chromiumAPI := struct{ ProtoAPI }{}
-				chromiumAPI.pdf = func(_ context.Context, _ *zap.Logger, _, _ string, _ Options) error {
-					return nil
-				}
-
-				return chromiumAPI
-			}(),
+			scenario: "success",
+			ctx:      &api.ContextMock{Context: new(api.Context)},
+			api: &ApiMock{func(ctx context.Context, logger *zap.Logger, url, outputPath string, options Options) error {
+				return nil
+			}},
 			options:                DefaultOptions(),
+			expectError:            false,
+			expectHttpError:        false,
 			expectOutputPathsCount: 1,
 		},
 	} {
-		err := convertURL(tc.ctx.Context, tc.api, tc.engine, "", tc.PDFformat, tc.options)
+		t.Run(tc.scenario, func(t *testing.T) {
+			tc.ctx.SetLogger(zap.NewNop())
+			err := convertUrl(tc.ctx.Context, tc.api, tc.engine, "", tc.pdfFormats, tc.options)
 
-		if tc.expectErr && err == nil {
-			t.Errorf("test %d: expected error but got: %v", i, err)
-		}
-
-		if !tc.expectErr && err != nil {
-			t.Errorf("test %d: expected no error but got: %v", i, err)
-		}
-
-		var httpErr api.HTTPError
-		isHTTPErr := errors.As(err, &httpErr)
-
-		if tc.expectHTTPErr && !isHTTPErr {
-			t.Errorf("test %d: expected HTTP error but got: %v", i, err)
-		}
-
-		if !tc.expectHTTPErr && isHTTPErr {
-			t.Errorf("test %d: expected no HTTP error but got one: %v", i, httpErr)
-		}
-
-		if err != nil && tc.expectHTTPErr && isHTTPErr {
-			status, _ := httpErr.HTTPError()
-			if status != tc.expectHTTPStatus {
-				t.Errorf("test %d: expected %d HTTP status code but got %d", i, tc.expectHTTPStatus, status)
+			if tc.expectError && err == nil {
+				t.Fatal("expected error but got none", err)
 			}
-		}
 
-		if tc.expectOutputPathsCount != len(tc.ctx.OutputPaths()) {
-			t.Errorf("test %d: expected %d output paths but got %d", i, tc.expectOutputPathsCount, len(tc.ctx.OutputPaths()))
-		}
+			if !tc.expectError && err != nil {
+				t.Fatalf("expected no error but got: %v", err)
+			}
+
+			var httpErr api.HttpError
+			isHttpError := errors.As(err, &httpErr)
+
+			if tc.expectHttpError && !isHttpError {
+				t.Errorf("expected an HTTP error but got: %v", err)
+			}
+
+			if !tc.expectHttpError && isHttpError {
+				t.Errorf("expected no HTTP error but got one: %v", httpErr)
+			}
+
+			if err != nil && tc.expectHttpError && isHttpError {
+				status, _ := httpErr.HttpError()
+				if status != tc.expectHttpStatus {
+					t.Errorf("expected %d as HTTP status code but got %d", tc.expectHttpStatus, status)
+				}
+			}
+
+			if tc.expectOutputPathsCount != len(tc.ctx.OutputPaths()) {
+				t.Errorf("expected %d output paths but got %d", tc.expectOutputPathsCount, len(tc.ctx.OutputPaths()))
+			}
+		})
 	}
 }

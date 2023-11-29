@@ -5,14 +5,15 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/gotenberg/gotenberg/v7/pkg/gotenberg"
-	"github.com/gotenberg/gotenberg/v7/pkg/modules/api"
 	flag "github.com/spf13/pflag"
 	"go.uber.org/multierr"
+
+	"github.com/gotenberg/gotenberg/v7/pkg/gotenberg"
+	"github.com/gotenberg/gotenberg/v7/pkg/modules/api"
 )
 
 func init() {
-	gotenberg.MustRegisterModule(Webhook{})
+	gotenberg.MustRegisterModule(new(Webhook))
 }
 
 // Webhook is a module which provides a middleware for uploading output files
@@ -29,8 +30,8 @@ type Webhook struct {
 	disable        bool
 }
 
-// Descriptor returns an Webhook's module descriptor.
-func (Webhook) Descriptor() gotenberg.ModuleDescriptor {
+// Descriptor returns an [Webhook]'s module descriptor.
+func (w *Webhook) Descriptor() gotenberg.ModuleDescriptor {
 	return gotenberg.ModuleDescriptor{
 		ID: "webhook",
 		FlagSet: func() *flag.FlagSet {
@@ -93,7 +94,7 @@ func (w *Webhook) Provision(ctx *gotenberg.Context) error {
 }
 
 // Middlewares returns the middleware.
-func (w Webhook) Middlewares() ([]api.Middleware, error) {
+func (w *Webhook) Middlewares() ([]api.Middleware, error) {
 	if w.disable {
 		return nil, nil
 	}
@@ -103,27 +104,9 @@ func (w Webhook) Middlewares() ([]api.Middleware, error) {
 	}, nil
 }
 
-// AddGraceDuration increases the grace duration provided by the API for the
-// garbage collector.
-func (w Webhook) AddGraceDuration() time.Duration {
-	var duration time.Duration
-
-	if w.disable {
-		return duration
-	}
-
-	for i := 0; i < w.maxRetry; i++ {
-		// Yep... Golang does not allow int * time.Duration.
-		duration += w.retryMaxWait
-	}
-
-	return duration
-}
-
 // Interface guards.
 var (
-	_ gotenberg.Module                             = (*Webhook)(nil)
-	_ gotenberg.Provisioner                        = (*Webhook)(nil)
-	_ api.MiddlewareProvider                       = (*Webhook)(nil)
-	_ api.GarbageCollectorGraceDurationIncrementer = (*Webhook)(nil)
+	_ gotenberg.Module       = (*Webhook)(nil)
+	_ gotenberg.Provisioner  = (*Webhook)(nil)
+	_ api.MiddlewareProvider = (*Webhook)(nil)
 )
